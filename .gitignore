@@ -1,0 +1,46 @@
+# Build outputs
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+*.out
+*.stackdump
+
+# Test binaries
+test_all
+tests/test_all
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# Coverage and profiling
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+coverage/
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*.user
+*.sln.docstates
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local env
+*.log
+git.txt

@@ -1,0 +1,34 @@
+# API Reference
+
+> **Header:** `#include "mcbor.h"` | **Version:** 1.0.0
+
+See the header file for complete function signatures. All functions return
+`mcbor_err_t`. Use `mcbor_err_str()` for human-readable errors.
+
+## CBOR wire format quick reference
+
+| Value range | Encoding | Bytes |
+|-------------|----------|-------|
+| 0-23 | value in header | 1 |
+| 24-255 | header + 1 byte | 2 |
+| 256-65535 | header + 2 bytes | 3 |
+| 65536-4294967295 | header + 4 bytes | 5 |
+| float32 | `0xFA` + 4 bytes | 5 |
+| false / true / null | `0xF4` / `0xF5` / `0xF6` | 1 |
+| string `"hi"` | `0x62` + `"hi"` | 3 |
+
+## Error codes
+
+| Code | Meaning |
+|------|---------|
+| `MCBOR_OK` | Success |
+| `MCBOR_ERR_NULL` | NULL pointer |
+| `MCBOR_ERR_OVERFLOW` | Buffer too small for encode |
+| `MCBOR_ERR_UNDERFLOW` | Not enough data to decode |
+| `MCBOR_ERR_TYPE` | Unexpected CBOR type |
+| `MCBOR_ERR_INVALID` | Malformed CBOR |
+| `MCBOR_ERR_SIZE` | Output buffer too small |
+
+## Thread safety
+
+Not thread-safe. Each encoder and decoder instance must be used from one thread.
