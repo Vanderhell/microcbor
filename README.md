@@ -1,6 +1,6 @@
 # microcbor
 
-[![CI](https://img.shields.io/github/actions/workflow/status/Vanderhell/microcbor/ci.yml?branch=main&label=ci)](https://github.com/Vanderhell/microcbor/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/Vanderhell/microcbor/ci.yml?branch=master&label=ci)](https://github.com/Vanderhell/microcbor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![C99](https://img.shields.io/badge/language-C99-blue.svg)](#quick-start)
 [![Zero Allocation](https://img.shields.io/badge/memory-zero%20allocation-orange.svg)](#features)
