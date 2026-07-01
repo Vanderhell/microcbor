@@ -117,7 +117,7 @@ jobs:
       - name: Install ARM toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends binutils-arm-none-eabi gcc-arm-none-eabi
+          sudo apt-get install -y --no-install-recommends binutils-arm-none-eabi gcc-arm-none-eabi libnewlib-dev
 
       - name: Compile-only
         run: |
