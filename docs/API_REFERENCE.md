@@ -1,6 +1,6 @@
 # API Reference
 
-> **Header:** `#include "mcbor.h"` | **Version:** 1.0.0
+> **Header:** `#include "mcbor.h"` | **Config:** `mcbor_config.h`
 
 See the header file for complete function signatures. All functions return
 `mcbor_err_t`. Use `mcbor_err_str()` for human-readable errors.
@@ -28,7 +28,13 @@ See the header file for complete function signatures. All functions return
 | `MCBOR_ERR_TYPE` | Unexpected CBOR type |
 | `MCBOR_ERR_INVALID` | Malformed CBOR |
 | `MCBOR_ERR_SIZE` | Output buffer too small |
+| `MCBOR_ERR_RANGE` | Value exceeds supported range |
+| `MCBOR_ERR_UNSUPPORTED` | Feature disabled or unavailable |
 
-## Thread safety
+## Contracts
 
-Not thread-safe. Each encoder and decoder instance must be used from one thread.
+- Public status and type representations use fixed-width typedefs.
+- Caller-facing capacities, positions, and lengths use `size_t`.
+- Encode and decode entry points are transactional on failure.
+- `mcbor_validate_one()` validates exactly one complete top-level supported item.
+- Float32 support is controlled by `MCBOR_ENABLE_FLOAT32`.

@@ -26,13 +26,13 @@ allocation are required.
 
 ## 6. Skip for forward compatibility
 
-`mcbor_dec_skip` handles nested containers recursively and helps tolerate unknown
-fields during protocol evolution.
+`mcbor_dec_skip` is iterative so malformed nesting depth does not consume call
+stack space during validation or skipping.
 
 | Decision | Gains | Costs |
 |----------|-------|-------|
 | Definite-length only | Simple, small decoder | Cannot stream encode |
-| No 64-bit | Compact, portable | Max 4 billion |
+| No 64-bit | Compact, fixed-range ABI | Max 4 billion |
 | No tags | Smaller payloads | No semantic annotations |
-| Sticky overflow | Ergonomic API | Must check after sequence |
+| Sticky overflow | Ergonomic API | Reinit required after overflow |
 | Zero-copy refs | No allocation | Lifetime tied to input buffer |

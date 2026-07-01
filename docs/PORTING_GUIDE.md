@@ -10,8 +10,8 @@ add_library(microcbor STATIC lib/microcbor/src/mcbor.c)
 target_include_directories(microcbor PUBLIC lib/microcbor/include)
 ```
 
-Works on bare metal, RTOS, Linux, Windows, and macOS. The only libc dependency is
-`string.h` for `memcpy`, `memset`, and `strlen`.
+The code is written in C99 against standard headers. Treat compiler and platform
+support as a verification result, not a blanket portability claim.
 
 ## Usage with iotspool
 

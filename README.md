@@ -5,9 +5,9 @@
 [![C99](https://img.shields.io/badge/language-C99-blue.svg)](#quick-start)
 [![Zero Allocation](https://img.shields.io/badge/memory-zero%20allocation-orange.svg)](#features)
 
-Minimal CBOR encoder/decoder for embedded systems.
+Minimal CBOR encoder/decoder for fixed-memory environments.
 
-C99 | Zero dependencies | Zero allocations | RFC 8949 subset | Portable
+C99 | Zero dependencies | Zero allocations | Definite-length RFC 8949 subset
 
 ## Why microcbor?
 
@@ -59,7 +59,7 @@ Implemented:
 - Float32
 - Text strings and byte strings
 - Definite-length arrays and maps
-- Recursive skip for unknown or forward-compatible fields
+- Iterative skip for unknown or forward-compatible fields
 
 Not implemented:
 
@@ -165,6 +165,15 @@ On Windows, use MinGW, MSYS2, or WSL if `gcc` and `make` are not already install
 | `mcbor_dec_remaining` | Return unread bytes |
 | `mcbor_dec_done` | Check whether input is fully consumed |
 
+## Documentation
+
+- [Cookbook](docs/COOKBOOK.md)
+- [API Reference](docs/API_REFERENCE.md)
+- [Design Notes](docs/DESIGN.md)
+- [Porting Guide](docs/PORTING_GUIDE.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Verification Status](docs/VERIFICATION.md)
+
 ## Repository Layout
 
 - `include/mcbor.h` public API
@@ -182,10 +191,10 @@ On Windows, use MinGW, MSYS2, or WSL if `gcc` and `make` are not already install
 | [microconf](https://github.com/Vanderhell/microconf) | Export config as CBOR for OTA |
 | [microlog](https://github.com/Vanderhell/microlog) | Log CBOR encode and decode errors |
 
-## Project Status
+## Release Policy
 
-`microcbor` is suitable for publishing as a focused embedded utility library. The
-main remaining quality lever after publishing is automated CI execution on GitHub.
+Releases are tag-based and are intended to run from pushed `v*` tags.
+See [CHANGELOG.md](CHANGELOG.md) and [.github/workflows/release.yml](.github/workflows/release.yml).
 
 ## License
 
