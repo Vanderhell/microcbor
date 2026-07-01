@@ -259,9 +259,14 @@ TEST(test_enc_null) {
 TEST(test_enc_float) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
-    mcbor_enc_float(&enc, 3.14f);
+#if MCBOR_ENABLE_FLOAT32
+    ASSERT_EQ(MCBOR_OK, mcbor_enc_float(&enc, 3.14f));
     ASSERT_EQ(5, (int)query_enc_size(&enc));
     ASSERT_EQ(0xFA, buf[0]);  /* major 7, 4-byte float */
+#else
+    ASSERT_EQ(MCBOR_ERR_UNSUPPORTED, mcbor_enc_float(&enc, 3.14f));
+    ASSERT_EQ(0, (int)query_enc_size(&enc));
+#endif
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -397,13 +402,18 @@ TEST(test_roundtrip_bool) {
 TEST(test_roundtrip_float) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
-    mcbor_enc_float(&enc, -273.15f);
+#if MCBOR_ENABLE_FLOAT32
+    ASSERT_EQ(MCBOR_OK, mcbor_enc_float(&enc, -273.15f));
 
     mcbor_dec_t dec;
     mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     float val;
     ASSERT_EQ(MCBOR_OK, mcbor_dec_float(&dec, &val));
     ASSERT_FLOAT_EQ(-273.15f, val);
+#else
+    ASSERT_EQ(MCBOR_ERR_UNSUPPORTED, mcbor_enc_float(&enc, -273.15f));
+    ASSERT_EQ(0, (int)query_enc_size(&enc));
+#endif
 }
 
 TEST(test_roundtrip_str) {
@@ -471,6 +481,7 @@ TEST(test_roundtrip_array) {
 TEST(test_roundtrip_map) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
+#if MCBOR_ENABLE_FLOAT32
     mcbor_enc_map(&enc, 2);
     mcbor_enc_str(&enc, "temp");
     mcbor_enc_float(&enc, 22.5f);
@@ -498,6 +509,9 @@ TEST(test_roundtrip_map) {
     ASSERT_STR_EQ("hum", key);
     mcbor_dec_uint(&dec, &uval);
     ASSERT_EQ(65, (int)uval);
+#else
+    ASSERT_EQ(MCBOR_ERR_UNSUPPORTED, mcbor_enc_float(&enc, 22.5f));
+#endif
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -505,6 +519,7 @@ TEST(test_roundtrip_map) {
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 TEST(test_telemetry_payload) {
+#if MCBOR_ENABLE_FLOAT32
     /* Encode: {"device":"sensor-01","temp":23.4,"hum":55,"ok":true} */
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
@@ -552,6 +567,11 @@ TEST(test_telemetry_payload) {
     ASSERT_TRUE(bval);
 
     ASSERT_TRUE(query_dec_done(&dec));
+#else
+    mcbor_enc_t enc;
+    mcbor_enc_init(&enc, buf, sizeof(buf));
+    ASSERT_EQ(MCBOR_ERR_UNSUPPORTED, mcbor_enc_float(&enc, 23.4f));
+#endif
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -194,6 +194,7 @@ typedef char mcbor_float32_must_be_ieee754_binary32[
 
 /* ── Float bit-cast (avoids strict aliasing) ───────────────────────────── */
 
+#if MCBOR_ENABLE_FLOAT32
 static inline uint32_t float_to_bits(float f)
 {
     uint32_t bits;
@@ -207,6 +208,7 @@ static inline float bits_to_float(uint32_t bits)
     memcpy(&f, &bits, sizeof(f));
     return f;
 }
+#endif
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * Encoder

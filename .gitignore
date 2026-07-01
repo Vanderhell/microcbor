@@ -44,3 +44,4 @@ Desktop.ini
 # Local env
 *.log
 git.txt
+/prompts
