@@ -71,6 +71,50 @@ static int tests_run = 0, tests_passed = 0, tests_failed = 0;
     }                                                           \
 } while (0)
 
+static size_t query_enc_size(const mcbor_enc_t *enc)
+{
+    size_t size = 0;
+    if (mcbor_enc_size(enc, &size) != MCBOR_OK) {
+        printf("FAIL\n    %s:%d: mcbor_enc_size failed\n", __FILE__, __LINE__);
+        tests_failed++;
+        return 0;
+    }
+    return size;
+}
+
+static bool query_enc_overflow(const mcbor_enc_t *enc)
+{
+    bool overflow = false;
+    if (mcbor_enc_overflow(enc, &overflow) != MCBOR_OK) {
+        printf("FAIL\n    %s:%d: mcbor_enc_overflow failed\n", __FILE__, __LINE__);
+        tests_failed++;
+        return false;
+    }
+    return overflow;
+}
+
+static size_t query_dec_remaining(const mcbor_dec_t *dec)
+{
+    size_t remaining = 0;
+    if (mcbor_dec_remaining(dec, &remaining) != MCBOR_OK) {
+        printf("FAIL\n    %s:%d: mcbor_dec_remaining failed\n", __FILE__, __LINE__);
+        tests_failed++;
+        return 0;
+    }
+    return remaining;
+}
+
+static bool query_dec_done(const mcbor_dec_t *dec)
+{
+    bool done = false;
+    if (mcbor_dec_done(dec, &done) != MCBOR_OK) {
+        printf("FAIL\n    %s:%d: mcbor_dec_done failed\n", __FILE__, __LINE__);
+        tests_failed++;
+        return false;
+    }
+    return done;
+}
+
 /* ── Common buffer ─────────────────────────────────────────────────────── */
 
 static uint8_t buf[256];
@@ -82,8 +126,8 @@ static uint8_t buf[256];
 TEST(test_enc_init) {
     mcbor_enc_t enc;
     ASSERT_EQ(MCBOR_OK, mcbor_enc_init(&enc, buf, sizeof(buf)));
-    ASSERT_EQ(0, (int)mcbor_enc_size(&enc));
-    ASSERT_FALSE(mcbor_enc_overflow(&enc));
+    ASSERT_EQ(0, (int)query_enc_size(&enc));
+    ASSERT_FALSE(query_enc_overflow(&enc));
 }
 
 TEST(test_enc_init_null) {
@@ -100,7 +144,7 @@ TEST(test_enc_uint_tiny) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_uint(&enc, 0);
-    ASSERT_EQ(1, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(1, (int)query_enc_size(&enc));
     ASSERT_EQ(0x00, buf[0]);  /* major 0, value 0 */
 }
 
@@ -108,7 +152,7 @@ TEST(test_enc_uint_23) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_uint(&enc, 23);
-    ASSERT_EQ(1, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(1, (int)query_enc_size(&enc));
     ASSERT_EQ(0x17, buf[0]);  /* major 0, value 23 */
 }
 
@@ -116,7 +160,7 @@ TEST(test_enc_uint_24) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_uint(&enc, 24);
-    ASSERT_EQ(2, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(2, (int)query_enc_size(&enc));
     ASSERT_EQ(0x18, buf[0]);  /* major 0, 1-byte follows */
     ASSERT_EQ(24, buf[1]);
 }
@@ -125,7 +169,7 @@ TEST(test_enc_uint_255) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_uint(&enc, 255);
-    ASSERT_EQ(2, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(2, (int)query_enc_size(&enc));
     ASSERT_EQ(0x18, buf[0]);
     ASSERT_EQ(255, buf[1]);
 }
@@ -134,7 +178,7 @@ TEST(test_enc_uint_256) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_uint(&enc, 256);
-    ASSERT_EQ(3, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(3, (int)query_enc_size(&enc));
     ASSERT_EQ(0x19, buf[0]);  /* major 0, 2-byte follows */
     ASSERT_EQ(0x01, buf[1]);
     ASSERT_EQ(0x00, buf[2]);
@@ -144,7 +188,7 @@ TEST(test_enc_uint_65536) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_uint(&enc, 65536);
-    ASSERT_EQ(5, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(5, (int)query_enc_size(&enc));
     ASSERT_EQ(0x1A, buf[0]);  /* major 0, 4-byte follows */
 }
 
@@ -152,7 +196,7 @@ TEST(test_enc_int_positive) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_int(&enc, 42);
-    ASSERT_EQ(2, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(2, (int)query_enc_size(&enc));
     /* Should encode as uint */
     ASSERT_EQ(0x18, buf[0]);
     ASSERT_EQ(42, buf[1]);
@@ -162,7 +206,7 @@ TEST(test_enc_int_negative_1) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_int(&enc, -1);
-    ASSERT_EQ(1, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(1, (int)query_enc_size(&enc));
     ASSERT_EQ(0x20, buf[0]);  /* major 1, value 0 → -1 */
 }
 
@@ -170,7 +214,7 @@ TEST(test_enc_int_negative_100) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_int(&enc, -100);
-    ASSERT_EQ(2, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(2, (int)query_enc_size(&enc));
     ASSERT_EQ(0x38, buf[0]);  /* major 1, 1-byte follows */
     ASSERT_EQ(99, buf[1]);    /* -100 → argument 99 */
 }
@@ -183,7 +227,7 @@ TEST(test_enc_bool_false) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_bool(&enc, false);
-    ASSERT_EQ(1, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(1, (int)query_enc_size(&enc));
     ASSERT_EQ(0xF4, buf[0]);  /* major 7, simple 20 */
 }
 
@@ -191,7 +235,7 @@ TEST(test_enc_bool_true) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_bool(&enc, true);
-    ASSERT_EQ(1, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(1, (int)query_enc_size(&enc));
     ASSERT_EQ(0xF5, buf[0]);  /* major 7, simple 21 */
 }
 
@@ -199,7 +243,7 @@ TEST(test_enc_null) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_null(&enc);
-    ASSERT_EQ(1, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(1, (int)query_enc_size(&enc));
     ASSERT_EQ(0xF6, buf[0]);  /* major 7, simple 22 */
 }
 
@@ -207,7 +251,7 @@ TEST(test_enc_float) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_float(&enc, 3.14f);
-    ASSERT_EQ(5, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(5, (int)query_enc_size(&enc));
     ASSERT_EQ(0xFA, buf[0]);  /* major 7, 4-byte float */
 }
 
@@ -219,7 +263,7 @@ TEST(test_enc_str) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_str(&enc, "hello");
-    ASSERT_EQ(6, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(6, (int)query_enc_size(&enc));
     ASSERT_EQ(0x65, buf[0]);  /* major 3, length 5 */
     ASSERT_MEM_EQ("hello", buf + 1, 5);
 }
@@ -228,7 +272,7 @@ TEST(test_enc_str_empty) {
     mcbor_enc_t enc;
     mcbor_enc_init(&enc, buf, sizeof(buf));
     mcbor_enc_str(&enc, "");
-    ASSERT_EQ(1, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(1, (int)query_enc_size(&enc));
     ASSERT_EQ(0x60, buf[0]);  /* major 3, length 0 */
 }
 
@@ -237,7 +281,7 @@ TEST(test_enc_bytes) {
     mcbor_enc_init(&enc, buf, sizeof(buf));
     uint8_t data[] = { 0xDE, 0xAD, 0xBE, 0xEF };
     mcbor_enc_bytes(&enc, data, 4);
-    ASSERT_EQ(5, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(5, (int)query_enc_size(&enc));
     ASSERT_EQ(0x44, buf[0]);  /* major 2, length 4 */
     ASSERT_MEM_EQ(data, buf + 1, 4);
 }
@@ -253,7 +297,7 @@ TEST(test_enc_array) {
     mcbor_enc_uint(&enc, 1);
     mcbor_enc_uint(&enc, 2);
     mcbor_enc_uint(&enc, 3);
-    ASSERT_EQ(4, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(4, (int)query_enc_size(&enc));
     ASSERT_EQ(0x83, buf[0]);  /* major 4, length 3 */
 }
 
@@ -266,7 +310,7 @@ TEST(test_enc_map) {
     mcbor_enc_str(&enc, "b");
     mcbor_enc_uint(&enc, 2);
     /* map(2) + "a" + 1 + "b" + 2 = 1 + 2 + 1 + 2 + 1 = 7 */
-    ASSERT_EQ(7, (int)mcbor_enc_size(&enc));
+    ASSERT_EQ(7, (int)query_enc_size(&enc));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -279,7 +323,7 @@ TEST(test_enc_overflow) {
     mcbor_enc_init(&enc, tiny, sizeof(tiny));
 
     mcbor_enc_str(&enc, "this is way too long for 2 bytes");
-    ASSERT_TRUE(mcbor_enc_overflow(&enc));
+    ASSERT_TRUE(query_enc_overflow(&enc));
 }
 
 TEST(test_enc_overflow_sticky) {
@@ -288,10 +332,10 @@ TEST(test_enc_overflow_sticky) {
     mcbor_enc_init(&enc, tiny, sizeof(tiny));
 
     mcbor_enc_uint(&enc, 0);   /* OK — 1 byte */
-    ASSERT_FALSE(mcbor_enc_overflow(&enc));
+    ASSERT_FALSE(query_enc_overflow(&enc));
 
     mcbor_enc_uint(&enc, 0);   /* overflow */
-    ASSERT_TRUE(mcbor_enc_overflow(&enc));
+    ASSERT_TRUE(query_enc_overflow(&enc));
 
     /* Still overflow even after another attempt */
     ASSERT_EQ(MCBOR_ERR_OVERFLOW, mcbor_enc_uint(&enc, 0));
@@ -307,11 +351,11 @@ TEST(test_roundtrip_uint) {
     mcbor_enc_uint(&enc, 12345);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     uint32_t val;
     ASSERT_EQ(MCBOR_OK, mcbor_dec_uint(&dec, &val));
     ASSERT_EQ(12345, (int)val);
-    ASSERT_TRUE(mcbor_dec_done(&dec));
+    ASSERT_TRUE(query_dec_done(&dec));
 }
 
 TEST(test_roundtrip_int_negative) {
@@ -320,7 +364,7 @@ TEST(test_roundtrip_int_negative) {
     mcbor_enc_int(&enc, -500);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     int32_t val;
     ASSERT_EQ(MCBOR_OK, mcbor_dec_int(&dec, &val));
     ASSERT_EQ(-500, val);
@@ -333,7 +377,7 @@ TEST(test_roundtrip_bool) {
     mcbor_enc_bool(&enc, false);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     bool v1, v2;
     ASSERT_EQ(MCBOR_OK, mcbor_dec_bool(&dec, &v1));
     ASSERT_EQ(MCBOR_OK, mcbor_dec_bool(&dec, &v2));
@@ -347,7 +391,7 @@ TEST(test_roundtrip_float) {
     mcbor_enc_float(&enc, -273.15f);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     float val;
     ASSERT_EQ(MCBOR_OK, mcbor_dec_float(&dec, &val));
     ASSERT_FLOAT_EQ(-273.15f, val);
@@ -359,9 +403,9 @@ TEST(test_roundtrip_str) {
     mcbor_enc_str(&enc, "temperature");
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     char out[32];
-    uint32_t len;
+    size_t len;
     ASSERT_EQ(MCBOR_OK, mcbor_dec_str(&dec, out, sizeof(out), &len));
     ASSERT_STR_EQ("temperature", out);
     ASSERT_EQ(11, (int)len);
@@ -374,9 +418,9 @@ TEST(test_roundtrip_bytes) {
     mcbor_enc_bytes(&enc, data, 4);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     const uint8_t *out;
-    uint32_t len;
+    size_t len;
     ASSERT_EQ(MCBOR_OK, mcbor_dec_bytes_ref(&dec, &out, &len));
     ASSERT_EQ(4, (int)len);
     ASSERT_MEM_EQ(data, out, 4);
@@ -388,10 +432,10 @@ TEST(test_roundtrip_null) {
     mcbor_enc_null(&enc);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     mcbor_value_t val;
     ASSERT_EQ(MCBOR_OK, mcbor_dec_next(&dec, &val));
-    ASSERT_TRUE(val.is_null);
+    ASSERT_EQ(MCBOR_SIMPLE_NULL, val.simple_kind);
 }
 
 TEST(test_roundtrip_array) {
@@ -403,8 +447,8 @@ TEST(test_roundtrip_array) {
     mcbor_enc_uint(&enc, 30);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
-    uint32_t count;
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
+    size_t count;
     ASSERT_EQ(MCBOR_OK, mcbor_dec_array(&dec, &count));
     ASSERT_EQ(3, (int)count);
 
@@ -412,7 +456,7 @@ TEST(test_roundtrip_array) {
     mcbor_dec_uint(&dec, &v); ASSERT_EQ(10, (int)v);
     mcbor_dec_uint(&dec, &v); ASSERT_EQ(20, (int)v);
     mcbor_dec_uint(&dec, &v); ASSERT_EQ(30, (int)v);
-    ASSERT_TRUE(mcbor_dec_done(&dec));
+    ASSERT_TRUE(query_dec_done(&dec));
 }
 
 TEST(test_roundtrip_map) {
@@ -425,14 +469,14 @@ TEST(test_roundtrip_map) {
     mcbor_enc_uint(&enc, 65);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
 
-    uint32_t count;
+    size_t count;
     ASSERT_EQ(MCBOR_OK, mcbor_dec_map(&dec, &count));
     ASSERT_EQ(2, (int)count);
 
     char key[16];
-    uint32_t klen;
+    size_t klen;
     float fval;
     uint32_t uval;
 
@@ -461,19 +505,19 @@ TEST(test_telemetry_payload) {
     mcbor_enc_str(&enc, "hum");     mcbor_enc_uint(&enc, 55);
     mcbor_enc_str(&enc, "ok");      mcbor_enc_bool(&enc, true);
 
-    uint32_t size = mcbor_enc_size(&enc);
-    ASSERT_FALSE(mcbor_enc_overflow(&enc));
+    size_t size = query_enc_size(&enc);
+    ASSERT_FALSE(query_enc_overflow(&enc));
 
     /* Decode and verify */
     mcbor_dec_t dec;
     mcbor_dec_init(&dec, buf, size);
 
-    uint32_t count;
+    size_t count;
     mcbor_dec_map(&dec, &count);
     ASSERT_EQ(4, (int)count);
 
     char key[16], sval[32];
-    uint32_t klen, slen;
+    size_t klen, slen;
     float fval;
     uint32_t uval;
     bool bval;
@@ -498,7 +542,7 @@ TEST(test_telemetry_payload) {
     mcbor_dec_bool(&dec, &bval);
     ASSERT_TRUE(bval);
 
-    ASSERT_TRUE(mcbor_dec_done(&dec));
+    ASSERT_TRUE(query_dec_done(&dec));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -518,7 +562,7 @@ TEST(test_dec_type_mismatch) {
     mcbor_enc_str(&enc, "hello");
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     uint32_t val;
     ASSERT_EQ(MCBOR_ERR_TYPE, mcbor_dec_uint(&dec, &val));
 }
@@ -529,9 +573,9 @@ TEST(test_dec_str_too_small) {
     mcbor_enc_str(&enc, "this is a long string");
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     char tiny[4];
-    uint32_t len;
+    size_t len;
     ASSERT_EQ(MCBOR_ERR_SIZE, mcbor_dec_str(&dec, tiny, sizeof(tiny), &len));
 }
 
@@ -553,7 +597,7 @@ TEST(test_dec_skip_scalar) {
     mcbor_enc_uint(&enc, 42);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     ASSERT_EQ(MCBOR_OK, mcbor_dec_skip(&dec));  /* skip the string */
 
     uint32_t val;
@@ -572,11 +616,11 @@ TEST(test_dec_skip_nested) {
       mcbor_enc_uint(&enc, 99);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
 
     /* Skip the entire array */
     ASSERT_EQ(MCBOR_OK, mcbor_dec_skip(&dec));
-    ASSERT_TRUE(mcbor_dec_done(&dec));
+    ASSERT_TRUE(query_dec_done(&dec));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -591,7 +635,7 @@ TEST(test_roundtrip_zero) {
     mcbor_enc_float(&enc, 0.0f);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     uint32_t u; int32_t i; float f;
     mcbor_dec_uint(&dec, &u); ASSERT_EQ(0, (int)u);
     mcbor_dec_int(&dec, &i);  ASSERT_EQ(0, i);
@@ -604,7 +648,7 @@ TEST(test_roundtrip_large_uint) {
     mcbor_enc_uint(&enc, 0xFFFFFFFF);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
     uint32_t val;
     mcbor_dec_uint(&dec, &val);
     ASSERT_EQ((int)0xFFFFFFFF, (int)val);
@@ -617,15 +661,15 @@ TEST(test_dec_remaining) {
     mcbor_enc_uint(&enc, 2);
 
     mcbor_dec_t dec;
-    mcbor_dec_init(&dec, buf, mcbor_enc_size(&enc));
-    ASSERT_EQ(2, (int)mcbor_dec_remaining(&dec));
-    ASSERT_FALSE(mcbor_dec_done(&dec));
+    mcbor_dec_init(&dec, buf, query_enc_size(&enc));
+    ASSERT_EQ(2, (int)query_dec_remaining(&dec));
+    ASSERT_FALSE(query_dec_done(&dec));
 
     uint32_t v;
     mcbor_dec_uint(&dec, &v);
     mcbor_dec_uint(&dec, &v);
-    ASSERT_EQ(0, (int)mcbor_dec_remaining(&dec));
-    ASSERT_TRUE(mcbor_dec_done(&dec));
+    ASSERT_EQ(0, (int)query_dec_remaining(&dec));
+    ASSERT_TRUE(query_dec_done(&dec));
 }
 
 TEST(test_err_str) {

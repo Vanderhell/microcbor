@@ -24,5 +24,7 @@ mcbor_enc_map(&enc, 2);
 mcbor_enc_str(&enc, "temp");  mcbor_enc_float(&enc, temp);
 mcbor_enc_str(&enc, "hum");   mcbor_enc_uint(&enc, hum);
 
-spool_enqueue("sensor/data", cbor_buf, mcbor_enc_size(&enc));
+size_t used = 0;
+mcbor_enc_size(&enc, &used);
+spool_enqueue("sensor/data", cbor_buf, used);
 ```

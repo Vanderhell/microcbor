@@ -29,8 +29,11 @@ mcbor_enc_str(&enc, "temp");  mcbor_enc_float(&enc, 23.4f);
 mcbor_enc_str(&enc, "hum");   mcbor_enc_uint(&enc, 55);
 mcbor_enc_str(&enc, "ok");    mcbor_enc_bool(&enc, true);
 
-/* Send buf[0..mcbor_enc_size(&enc)] over MQTT */
-mqtt_publish("sensor/data", buf, mcbor_enc_size(&enc));
+size_t used = 0;
+mcbor_enc_size(&enc, &used);
+
+/* Send buf[0..used) over MQTT */
+mqtt_publish("sensor/data", buf, used);
 ```
 
 The same message in JSON would be `{"temp":23.4,"hum":55,"ok":true}` (35 bytes).
@@ -78,7 +81,8 @@ mcbor_enc_map(&enc, 2);
 mcbor_enc_str(&enc, "device");  mcbor_enc_str(&enc, "sensor-01");
 mcbor_enc_str(&enc, "temp");    mcbor_enc_float(&enc, 22.5f);
 
-uint32_t size = mcbor_enc_size(&enc);
+size_t size = 0;
+mcbor_enc_size(&enc, &size);
 /* buf[0..size] contains valid CBOR */
 ```
 
@@ -88,12 +92,12 @@ uint32_t size = mcbor_enc_size(&enc);
 mcbor_dec_t dec;
 mcbor_dec_init(&dec, buf, size);
 
-uint32_t count;
+size_t count;
 mcbor_dec_map(&dec, &count);
 
-for (uint32_t i = 0; i < count; i++) {
+for (size_t i = 0; i < count; i++) {
     char key[24];
-    uint32_t klen;
+    size_t klen;
     mcbor_dec_str(&dec, key, sizeof(key), &klen);
 
     if (strcmp(key, "temp") == 0) {

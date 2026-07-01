@@ -23,29 +23,38 @@ extern "C" {
 
 /* ── Error codes ───────────────────────────────────────────────────────── */
 
-typedef enum {
-    MCBOR_OK             =  0,   /**< Success.                            */
-    MCBOR_ERR_NULL       = -1,   /**< NULL pointer argument.              */
-    MCBOR_ERR_OVERFLOW   = -2,   /**< Buffer too small for encode.        */
-    MCBOR_ERR_UNDERFLOW  = -3,   /**< Not enough data to decode.          */
-    MCBOR_ERR_TYPE       = -4,   /**< Unexpected CBOR type.               */
-    MCBOR_ERR_INVALID    = -5,   /**< Malformed CBOR data.                */
-    MCBOR_ERR_SIZE       = -6,   /**< String/bytes too large for output.  */
-} mcbor_err_t;
+typedef int32_t mcbor_err_t;
+
+#define MCBOR_OK              ((mcbor_err_t)0)   /**< Success.                            */
+#define MCBOR_ERR_NULL        ((mcbor_err_t)-1)  /**< NULL pointer argument.              */
+#define MCBOR_ERR_OVERFLOW    ((mcbor_err_t)-2)  /**< Buffer too small for encode.        */
+#define MCBOR_ERR_UNDERFLOW   ((mcbor_err_t)-3)  /**< Not enough data to decode.          */
+#define MCBOR_ERR_TYPE        ((mcbor_err_t)-4)  /**< Unexpected CBOR type.               */
+#define MCBOR_ERR_INVALID     ((mcbor_err_t)-5)  /**< Malformed CBOR data.                */
+#define MCBOR_ERR_SIZE        ((mcbor_err_t)-6)  /**< String/bytes too large for output.  */
+#define MCBOR_ERR_RANGE       ((mcbor_err_t)-7)  /**< Host size exceeds wire-format max.  */
+#define MCBOR_ERR_UNSUPPORTED ((mcbor_err_t)-8)  /**< Feature is not supported.           */
 
 const char *mcbor_err_str(mcbor_err_t err);
 
 /* ── CBOR types ────────────────────────────────────────────────────────── */
 
-typedef enum {
-    MCBOR_UINT    = 0,   /**< Unsigned integer (major 0).               */
-    MCBOR_NEGINT  = 1,   /**< Negative integer (major 1): value = -1-n. */
-    MCBOR_BYTES   = 2,   /**< Byte string (major 2).                    */
-    MCBOR_TEXT    = 3,   /**< UTF-8 text string (major 3).              */
-    MCBOR_ARRAY   = 4,   /**< Array (major 4).                          */
-    MCBOR_MAP     = 5,   /**< Map (major 5).                            */
-    MCBOR_SIMPLE  = 7,   /**< Simple value / float (major 7).           */
-} mcbor_type_t;
+typedef uint8_t mcbor_type_t;
+
+#define MCBOR_UINT    ((mcbor_type_t)0)  /**< Unsigned integer (major 0).               */
+#define MCBOR_NEGINT  ((mcbor_type_t)1)  /**< Negative integer (major 1): value = -1-n. */
+#define MCBOR_BYTES   ((mcbor_type_t)2)  /**< Byte string (major 2).                    */
+#define MCBOR_TEXT    ((mcbor_type_t)3)  /**< UTF-8 text string (major 3).              */
+#define MCBOR_ARRAY   ((mcbor_type_t)4)  /**< Array (major 4).                          */
+#define MCBOR_MAP     ((mcbor_type_t)5)  /**< Map (major 5).                            */
+#define MCBOR_SIMPLE  ((mcbor_type_t)7)  /**< Simple value / float (major 7).           */
+
+typedef uint8_t mcbor_simple_kind_t;
+
+#define MCBOR_SIMPLE_NONE    ((mcbor_simple_kind_t)0)
+#define MCBOR_SIMPLE_BOOL    ((mcbor_simple_kind_t)1)
+#define MCBOR_SIMPLE_NULL    ((mcbor_simple_kind_t)2)
+#define MCBOR_SIMPLE_FLOAT32 ((mcbor_simple_kind_t)3)
 
 const char *mcbor_type_name(mcbor_type_t type);
 
@@ -58,8 +67,8 @@ const char *mcbor_type_name(mcbor_type_t type);
 
 typedef struct {
     uint8_t  *buf;       /**< Output buffer.                             */
-    uint32_t  capacity;  /**< Buffer capacity in bytes.                  */
-    uint32_t  pos;       /**< Current write position.                    */
+    size_t    capacity;  /**< Buffer capacity in bytes.                  */
+    size_t    pos;       /**< Current write position.                    */
     bool      overflow;  /**< Set true on first overflow (sticky).       */
 } mcbor_enc_t;
 
@@ -70,13 +79,13 @@ typedef struct {
  * @param buf  Output buffer.
  * @param cap  Buffer capacity in bytes.
  */
-mcbor_err_t mcbor_enc_init(mcbor_enc_t *enc, uint8_t *buf, uint32_t cap);
+mcbor_err_t mcbor_enc_init(mcbor_enc_t *enc, uint8_t *buf, size_t cap);
 
 /** Get number of bytes written so far. */
-uint32_t mcbor_enc_size(const mcbor_enc_t *enc);
+mcbor_err_t mcbor_enc_size(const mcbor_enc_t *enc, size_t *out_size);
 
 /** Check if overflow occurred. */
-bool mcbor_enc_overflow(const mcbor_enc_t *enc);
+mcbor_err_t mcbor_enc_overflow(const mcbor_enc_t *enc, bool *out_overflow);
 
 /* ── Encode primitives ─────────────────────────────────────────────────── */
 
@@ -96,13 +105,13 @@ mcbor_err_t mcbor_enc_null(mcbor_enc_t *enc);
 mcbor_err_t mcbor_enc_float(mcbor_enc_t *enc, float value);
 
 /** Encode UTF-8 text string. */
-mcbor_err_t mcbor_enc_text(mcbor_enc_t *enc, const char *str, uint32_t len);
+mcbor_err_t mcbor_enc_text(mcbor_enc_t *enc, const char *str, size_t len);
 
 /** Encode NUL-terminated text string. */
 mcbor_err_t mcbor_enc_str(mcbor_enc_t *enc, const char *str);
 
 /** Encode byte string. */
-mcbor_err_t mcbor_enc_bytes(mcbor_enc_t *enc, const uint8_t *data, uint32_t len);
+mcbor_err_t mcbor_enc_bytes(mcbor_enc_t *enc, const uint8_t *data, size_t len);
 
 /* ── Encode containers ─────────────────────────────────────────────────── */
 
@@ -110,13 +119,13 @@ mcbor_err_t mcbor_enc_bytes(mcbor_enc_t *enc, const uint8_t *data, uint32_t len)
  * Begin a definite-length array.
  * After this, encode exactly `count` items.
  */
-mcbor_err_t mcbor_enc_array(mcbor_enc_t *enc, uint32_t count);
+mcbor_err_t mcbor_enc_array(mcbor_enc_t *enc, size_t count);
 
 /**
  * Begin a definite-length map.
  * After this, encode exactly `count` key-value pairs (2 × count items).
  */
-mcbor_err_t mcbor_enc_map(mcbor_enc_t *enc, uint32_t count);
+mcbor_err_t mcbor_enc_map(mcbor_enc_t *enc, size_t count);
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * Decoder
@@ -135,17 +144,17 @@ typedef struct {
         float          float_val;   /**< MCBOR_SIMPLE (float)            */
         struct {
             const uint8_t *ptr;     /**< Pointer into input buffer.      */
-            uint32_t       len;     /**< Length in bytes.                 */
+            size_t         len;     /**< Length in bytes.                 */
         } bytes;                    /**< MCBOR_BYTES or MCBOR_TEXT        */
-        uint32_t       container;   /**< MCBOR_ARRAY or MCBOR_MAP: count */
+        size_t         container;   /**< MCBOR_ARRAY or MCBOR_MAP: count */
     } val;
-    bool is_null;                   /**< True if value is CBOR null.      */
+    mcbor_simple_kind_t simple_kind;/**< Explicit subtype for simple values. */
 } mcbor_value_t;
 
 typedef struct {
     const uint8_t *buf;      /**< Input buffer.                          */
-    uint32_t       size;     /**< Total buffer size.                     */
-    uint32_t       pos;      /**< Current read position.                 */
+    size_t         size;     /**< Total buffer size.                     */
+    size_t         pos;      /**< Current read position.                 */
 } mcbor_dec_t;
 
 /**
@@ -155,13 +164,13 @@ typedef struct {
  * @param buf   Input buffer containing CBOR data.
  * @param size  Size of input data in bytes.
  */
-mcbor_err_t mcbor_dec_init(mcbor_dec_t *dec, const uint8_t *buf, uint32_t size);
+mcbor_err_t mcbor_dec_init(mcbor_dec_t *dec, const uint8_t *buf, size_t size);
 
 /** Get remaining unread bytes. */
-uint32_t mcbor_dec_remaining(const mcbor_dec_t *dec);
+mcbor_err_t mcbor_dec_remaining(const mcbor_dec_t *dec, size_t *out_remaining);
 
 /** Check if all data has been consumed. */
-bool mcbor_dec_done(const mcbor_dec_t *dec);
+mcbor_err_t mcbor_dec_done(const mcbor_dec_t *dec, bool *out_done);
 
 /**
  * Decode the next CBOR item.
@@ -193,21 +202,21 @@ mcbor_err_t mcbor_dec_float(mcbor_dec_t *dec, float *out);
  * Decode next item as text string.
  * Copies into caller's buffer with NUL termination.
  */
-mcbor_err_t mcbor_dec_str(mcbor_dec_t *dec, char *out, uint32_t out_size,
-                           uint32_t *out_len);
+mcbor_err_t mcbor_dec_str(mcbor_dec_t *dec, char *out, size_t out_size,
+                           size_t *out_len);
 
 /**
  * Decode next item as byte string.
  * Returns pointer into input buffer (zero-copy) + length.
  */
 mcbor_err_t mcbor_dec_bytes_ref(mcbor_dec_t *dec, const uint8_t **out,
-                                 uint32_t *out_len);
+                                 size_t *out_len);
 
 /** Decode array header. Returns item count. */
-mcbor_err_t mcbor_dec_array(mcbor_dec_t *dec, uint32_t *count);
+mcbor_err_t mcbor_dec_array(mcbor_dec_t *dec, size_t *count);
 
 /** Decode map header. Returns pair count. */
-mcbor_err_t mcbor_dec_map(mcbor_dec_t *dec, uint32_t *count);
+mcbor_err_t mcbor_dec_map(mcbor_dec_t *dec, size_t *count);
 
 /**
  * Skip the next CBOR item (including nested containers).

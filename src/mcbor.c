@@ -28,7 +28,15 @@
 
 #define CBOR_SIMPLE_FALSE 20
 #define CBOR_SIMPLE_TRUE  21
-#define CBOR_SIMPLE_NULL  22
+#define CBOR_SIMPLE_VALUE_NULL 22
+
+static mcbor_err_t check_u32_range(size_t value)
+{
+    if (value > UINT32_MAX) {
+        return MCBOR_ERR_RANGE;
+    }
+    return MCBOR_OK;
+}
 
 /* ── Error strings ─────────────────────────────────────────────────────── */
 
@@ -42,6 +50,8 @@ const char *mcbor_err_str(mcbor_err_t err)
     case MCBOR_ERR_TYPE:      return "type mismatch";
     case MCBOR_ERR_INVALID:   return "invalid cbor";
     case MCBOR_ERR_SIZE:      return "size mismatch";
+    case MCBOR_ERR_RANGE:     return "value out of range";
+    case MCBOR_ERR_UNSUPPORTED:return "unsupported";
     default:                  return "unknown error";
     }
 }
@@ -107,7 +117,7 @@ static inline float bits_to_float(uint32_t bits)
  * Encoder
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-mcbor_err_t mcbor_enc_init(mcbor_enc_t *enc, uint8_t *buf, uint32_t cap)
+mcbor_err_t mcbor_enc_init(mcbor_enc_t *enc, uint8_t *buf, size_t cap)
 {
     if (enc == NULL || buf == NULL) return MCBOR_ERR_NULL;
     enc->buf      = buf;
@@ -117,20 +127,22 @@ mcbor_err_t mcbor_enc_init(mcbor_enc_t *enc, uint8_t *buf, uint32_t cap)
     return MCBOR_OK;
 }
 
-uint32_t mcbor_enc_size(const mcbor_enc_t *enc)
+mcbor_err_t mcbor_enc_size(const mcbor_enc_t *enc, size_t *out_size)
 {
-    if (enc == NULL) return 0;
-    return enc->pos;
+    if (enc == NULL || out_size == NULL) return MCBOR_ERR_NULL;
+    *out_size = enc->pos;
+    return MCBOR_OK;
 }
 
-bool mcbor_enc_overflow(const mcbor_enc_t *enc)
+mcbor_err_t mcbor_enc_overflow(const mcbor_enc_t *enc, bool *out_overflow)
 {
-    if (enc == NULL) return true;
-    return enc->overflow;
+    if (enc == NULL || out_overflow == NULL) return MCBOR_ERR_NULL;
+    *out_overflow = enc->overflow;
+    return MCBOR_OK;
 }
 
 /** Write raw bytes to the encoder buffer. */
-static mcbor_err_t enc_write(mcbor_enc_t *enc, const void *data, uint32_t len)
+static mcbor_err_t enc_write(mcbor_enc_t *enc, const void *data, size_t len)
 {
     if (enc->overflow) return MCBOR_ERR_OVERFLOW;
     if (enc->pos + len > enc->capacity) {
@@ -214,10 +226,12 @@ mcbor_err_t mcbor_enc_float(mcbor_enc_t *enc, float value)
     return enc_write(enc, tmp, 4);
 }
 
-mcbor_err_t mcbor_enc_text(mcbor_enc_t *enc, const char *str, uint32_t len)
+mcbor_err_t mcbor_enc_text(mcbor_enc_t *enc, const char *str, size_t len)
 {
     if (enc == NULL || str == NULL) return MCBOR_ERR_NULL;
-    mcbor_err_t err = enc_head(enc, CBOR_MAJOR_TEXT, len);
+    mcbor_err_t err = check_u32_range(len);
+    if (err != MCBOR_OK) return err;
+    err = enc_head(enc, CBOR_MAJOR_TEXT, (uint32_t)len);
     if (err != MCBOR_OK) return err;
     return enc_write(enc, str, len);
 }
@@ -225,34 +239,40 @@ mcbor_err_t mcbor_enc_text(mcbor_enc_t *enc, const char *str, uint32_t len)
 mcbor_err_t mcbor_enc_str(mcbor_enc_t *enc, const char *str)
 {
     if (str == NULL) return MCBOR_ERR_NULL;
-    return mcbor_enc_text(enc, str, (uint32_t)strlen(str));
+    return mcbor_enc_text(enc, str, strlen(str));
 }
 
-mcbor_err_t mcbor_enc_bytes(mcbor_enc_t *enc, const uint8_t *data, uint32_t len)
+mcbor_err_t mcbor_enc_bytes(mcbor_enc_t *enc, const uint8_t *data, size_t len)
 {
     if (enc == NULL || data == NULL) return MCBOR_ERR_NULL;
-    mcbor_err_t err = enc_head(enc, CBOR_MAJOR_BYTES, len);
+    mcbor_err_t err = check_u32_range(len);
+    if (err != MCBOR_OK) return err;
+    err = enc_head(enc, CBOR_MAJOR_BYTES, (uint32_t)len);
     if (err != MCBOR_OK) return err;
     return enc_write(enc, data, len);
 }
 
-mcbor_err_t mcbor_enc_array(mcbor_enc_t *enc, uint32_t count)
+mcbor_err_t mcbor_enc_array(mcbor_enc_t *enc, size_t count)
 {
     if (enc == NULL) return MCBOR_ERR_NULL;
-    return enc_head(enc, CBOR_MAJOR_ARRAY, count);
+    mcbor_err_t err = check_u32_range(count);
+    if (err != MCBOR_OK) return err;
+    return enc_head(enc, CBOR_MAJOR_ARRAY, (uint32_t)count);
 }
 
-mcbor_err_t mcbor_enc_map(mcbor_enc_t *enc, uint32_t count)
+mcbor_err_t mcbor_enc_map(mcbor_enc_t *enc, size_t count)
 {
     if (enc == NULL) return MCBOR_ERR_NULL;
-    return enc_head(enc, CBOR_MAJOR_MAP, count);
+    mcbor_err_t err = check_u32_range(count);
+    if (err != MCBOR_OK) return err;
+    return enc_head(enc, CBOR_MAJOR_MAP, (uint32_t)count);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * Decoder
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-mcbor_err_t mcbor_dec_init(mcbor_dec_t *dec, const uint8_t *buf, uint32_t size)
+mcbor_err_t mcbor_dec_init(mcbor_dec_t *dec, const uint8_t *buf, size_t size)
 {
     if (dec == NULL || buf == NULL) return MCBOR_ERR_NULL;
     dec->buf  = buf;
@@ -261,16 +281,18 @@ mcbor_err_t mcbor_dec_init(mcbor_dec_t *dec, const uint8_t *buf, uint32_t size)
     return MCBOR_OK;
 }
 
-uint32_t mcbor_dec_remaining(const mcbor_dec_t *dec)
+mcbor_err_t mcbor_dec_remaining(const mcbor_dec_t *dec, size_t *out_remaining)
 {
-    if (dec == NULL) return 0;
-    return dec->size - dec->pos;
+    if (dec == NULL || out_remaining == NULL) return MCBOR_ERR_NULL;
+    *out_remaining = dec->size - dec->pos;
+    return MCBOR_OK;
 }
 
-bool mcbor_dec_done(const mcbor_dec_t *dec)
+mcbor_err_t mcbor_dec_done(const mcbor_dec_t *dec, bool *out_done)
 {
-    if (dec == NULL) return true;
-    return dec->pos >= dec->size;
+    if (dec == NULL || out_done == NULL) return MCBOR_ERR_NULL;
+    *out_done = dec->pos >= dec->size;
+    return MCBOR_OK;
 }
 
 /** Read the argument value from a CBOR head. */
@@ -336,7 +358,7 @@ mcbor_err_t mcbor_dec_next(mcbor_dec_t *dec, mcbor_value_t *val)
     case CBOR_MAJOR_BYTES:
         err = dec_argument(dec, info, &argument);
         if (err != MCBOR_OK) return err;
-        if (dec->pos + argument > dec->size) return MCBOR_ERR_UNDERFLOW;
+        if (dec->pos + (size_t)argument > dec->size) return MCBOR_ERR_UNDERFLOW;
         val->type = MCBOR_BYTES;
         val->val.bytes.ptr = dec->buf + dec->pos;
         val->val.bytes.len = argument;
@@ -346,7 +368,7 @@ mcbor_err_t mcbor_dec_next(mcbor_dec_t *dec, mcbor_value_t *val)
     case CBOR_MAJOR_TEXT:
         err = dec_argument(dec, info, &argument);
         if (err != MCBOR_OK) return err;
-        if (dec->pos + argument > dec->size) return MCBOR_ERR_UNDERFLOW;
+        if (dec->pos + (size_t)argument > dec->size) return MCBOR_ERR_UNDERFLOW;
         val->type = MCBOR_TEXT;
         val->val.bytes.ptr = dec->buf + dec->pos;
         val->val.bytes.len = argument;
@@ -370,17 +392,19 @@ mcbor_err_t mcbor_dec_next(mcbor_dec_t *dec, mcbor_value_t *val)
     case CBOR_MAJOR_SIMPLE:
         if (info == CBOR_SIMPLE_FALSE) {
             val->type = MCBOR_SIMPLE;
+            val->simple_kind = MCBOR_SIMPLE_BOOL;
             val->val.bool_val = false;
             return MCBOR_OK;
         }
         if (info == CBOR_SIMPLE_TRUE) {
             val->type = MCBOR_SIMPLE;
+            val->simple_kind = MCBOR_SIMPLE_BOOL;
             val->val.bool_val = true;
             return MCBOR_OK;
         }
-        if (info == CBOR_SIMPLE_NULL) {
+        if (info == CBOR_SIMPLE_VALUE_NULL) {
             val->type = MCBOR_SIMPLE;
-            val->is_null = true;
+            val->simple_kind = MCBOR_SIMPLE_NULL;
             return MCBOR_OK;
         }
         if (info == CBOR_INFO_4BYTE) {
@@ -389,6 +413,7 @@ mcbor_err_t mcbor_dec_next(mcbor_dec_t *dec, mcbor_value_t *val)
             uint32_t bits = get_u32(dec->buf + dec->pos);
             dec->pos += 4;
             val->type = MCBOR_SIMPLE;
+            val->simple_kind = MCBOR_SIMPLE_FLOAT32;
             val->val.float_val = bits_to_float(bits);
             return MCBOR_OK;
         }
@@ -435,7 +460,9 @@ mcbor_err_t mcbor_dec_bool(mcbor_dec_t *dec, bool *out)
     mcbor_value_t val;
     mcbor_err_t err = mcbor_dec_next(dec, &val);
     if (err != MCBOR_OK) return err;
-    if (val.type != MCBOR_SIMPLE || val.is_null) return MCBOR_ERR_TYPE;
+    if (val.type != MCBOR_SIMPLE || val.simple_kind != MCBOR_SIMPLE_BOOL) {
+        return MCBOR_ERR_TYPE;
+    }
     *out = val.val.bool_val;
     return MCBOR_OK;
 }
@@ -446,13 +473,15 @@ mcbor_err_t mcbor_dec_float(mcbor_dec_t *dec, float *out)
     mcbor_value_t val;
     mcbor_err_t err = mcbor_dec_next(dec, &val);
     if (err != MCBOR_OK) return err;
-    if (val.type != MCBOR_SIMPLE || val.is_null) return MCBOR_ERR_TYPE;
+    if (val.type != MCBOR_SIMPLE || val.simple_kind != MCBOR_SIMPLE_FLOAT32) {
+        return MCBOR_ERR_TYPE;
+    }
     *out = val.val.float_val;
     return MCBOR_OK;
 }
 
-mcbor_err_t mcbor_dec_str(mcbor_dec_t *dec, char *out, uint32_t out_size,
-                           uint32_t *out_len)
+mcbor_err_t mcbor_dec_str(mcbor_dec_t *dec, char *out, size_t out_size,
+                           size_t *out_len)
 {
     if (out == NULL) return MCBOR_ERR_NULL;
     mcbor_value_t val;
@@ -467,7 +496,7 @@ mcbor_err_t mcbor_dec_str(mcbor_dec_t *dec, char *out, uint32_t out_size,
 }
 
 mcbor_err_t mcbor_dec_bytes_ref(mcbor_dec_t *dec, const uint8_t **out,
-                                 uint32_t *out_len)
+                                 size_t *out_len)
 {
     if (out == NULL || out_len == NULL) return MCBOR_ERR_NULL;
     mcbor_value_t val;
@@ -479,7 +508,7 @@ mcbor_err_t mcbor_dec_bytes_ref(mcbor_dec_t *dec, const uint8_t **out,
     return MCBOR_OK;
 }
 
-mcbor_err_t mcbor_dec_array(mcbor_dec_t *dec, uint32_t *count)
+mcbor_err_t mcbor_dec_array(mcbor_dec_t *dec, size_t *count)
 {
     if (count == NULL) return MCBOR_ERR_NULL;
     mcbor_value_t val;
@@ -490,7 +519,7 @@ mcbor_err_t mcbor_dec_array(mcbor_dec_t *dec, uint32_t *count)
     return MCBOR_OK;
 }
 
-mcbor_err_t mcbor_dec_map(mcbor_dec_t *dec, uint32_t *count)
+mcbor_err_t mcbor_dec_map(mcbor_dec_t *dec, size_t *count)
 {
     if (count == NULL) return MCBOR_ERR_NULL;
     mcbor_value_t val;
