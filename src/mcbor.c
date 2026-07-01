@@ -6,6 +6,7 @@
  */
 
 #include "mcbor.h"
+#include <float.h>
 #include <string.h>
 
 /* ── CBOR wire format constants ────────────────────────────────────────── */
@@ -36,6 +37,100 @@ static mcbor_err_t check_u32_range(size_t value)
         return MCBOR_ERR_RANGE;
     }
     return MCBOR_OK;
+}
+
+static bool float32_supported(void)
+{
+    return FLT_RADIX == 2 && FLT_MANT_DIG == 24 && FLT_MAX_EXP == 128 &&
+           sizeof(float) == 4;
+}
+
+static bool is_valid_utf8(const uint8_t *data, size_t len)
+{
+    size_t i = 0;
+
+    while (i < len) {
+        uint8_t c = data[i++];
+
+        if (c <= 0x7F) {
+            continue;
+        }
+
+        if (c >= 0xC2 && c <= 0xDF) {
+            if (i >= len || (data[i] & 0xC0) != 0x80) return false;
+            i++;
+            continue;
+        }
+
+        if (c == 0xE0) {
+            if (i + 1 >= len) return false;
+            if (data[i] < 0xA0 || data[i] > 0xBF) return false;
+            if ((data[i + 1] & 0xC0) != 0x80) return false;
+            i += 2;
+            continue;
+        }
+
+        if (c >= 0xE1 && c <= 0xEC) {
+            if (i + 1 >= len) return false;
+            if ((data[i] & 0xC0) != 0x80 || (data[i + 1] & 0xC0) != 0x80) {
+                return false;
+            }
+            i += 2;
+            continue;
+        }
+
+        if (c == 0xED) {
+            if (i + 1 >= len) return false;
+            if (data[i] < 0x80 || data[i] > 0x9F) return false;
+            if ((data[i + 1] & 0xC0) != 0x80) return false;
+            i += 2;
+            continue;
+        }
+
+        if (c >= 0xEE && c <= 0xEF) {
+            if (i + 1 >= len) return false;
+            if ((data[i] & 0xC0) != 0x80 || (data[i + 1] & 0xC0) != 0x80) {
+                return false;
+            }
+            i += 2;
+            continue;
+        }
+
+        if (c == 0xF0) {
+            if (i + 2 >= len) return false;
+            if (data[i] < 0x90 || data[i] > 0xBF) return false;
+            if ((data[i + 1] & 0xC0) != 0x80 || (data[i + 2] & 0xC0) != 0x80) {
+                return false;
+            }
+            i += 3;
+            continue;
+        }
+
+        if (c >= 0xF1 && c <= 0xF3) {
+            if (i + 2 >= len) return false;
+            if ((data[i] & 0xC0) != 0x80 ||
+                (data[i + 1] & 0xC0) != 0x80 ||
+                (data[i + 2] & 0xC0) != 0x80) {
+                return false;
+            }
+            i += 3;
+            continue;
+        }
+
+        if (c == 0xF4) {
+            if (i + 2 >= len) return false;
+            if (data[i] < 0x80 || data[i] > 0x8F) return false;
+            if ((data[i + 1] & 0xC0) != 0x80 || (data[i + 2] & 0xC0) != 0x80) {
+                return false;
+            }
+            i += 3;
+            continue;
+        }
+
+        return false;
+    }
+
+    return true;
 }
 
 /* ── Error strings ─────────────────────────────────────────────────────── */
@@ -141,99 +236,155 @@ mcbor_err_t mcbor_enc_overflow(const mcbor_enc_t *enc, bool *out_overflow)
     return MCBOR_OK;
 }
 
-/** Write raw bytes to the encoder buffer. */
-static mcbor_err_t enc_write(mcbor_enc_t *enc, const void *data, size_t len)
+static mcbor_err_t enc_prepare_write(const mcbor_enc_t *enc, size_t len)
 {
     if (enc->overflow) return MCBOR_ERR_OVERFLOW;
-    if (enc->pos + len > enc->capacity) {
-        enc->overflow = true;
+    if (enc->pos > enc->capacity) return MCBOR_ERR_INVALID;
+    if (len > enc->capacity - enc->pos) {
         return MCBOR_ERR_OVERFLOW;
     }
-    memcpy(enc->buf + enc->pos, data, len);
-    enc->pos += len;
     return MCBOR_OK;
 }
 
-static mcbor_err_t enc_byte(mcbor_enc_t *enc, uint8_t b)
+static void enc_commit_bytes(mcbor_enc_t *enc, const uint8_t *data, size_t len)
 {
-    return enc_write(enc, &b, 1);
+    if (len != 0) {
+        memcpy(enc->buf + enc->pos, data, len);
+        enc->pos += len;
+    }
 }
 
 /**
  * Encode a CBOR head: major type + unsigned argument.
  * This is the core building block — everything else calls this.
  */
-static mcbor_err_t enc_head(mcbor_enc_t *enc, uint8_t major, uint32_t value)
+static size_t enc_head(uint8_t major, uint32_t value, uint8_t out[5])
 {
     if (value <= 23) {
-        return enc_byte(enc, major | (uint8_t)value);
+        out[0] = (uint8_t)(major | (uint8_t)value);
+        return 1;
     } else if (value <= 0xFF) {
-        mcbor_err_t err = enc_byte(enc, major | CBOR_INFO_1BYTE);
-        if (err != MCBOR_OK) return err;
-        return enc_byte(enc, (uint8_t)value);
+        out[0] = (uint8_t)(major | CBOR_INFO_1BYTE);
+        out[1] = (uint8_t)value;
+        return 2;
     } else if (value <= 0xFFFF) {
-        mcbor_err_t err = enc_byte(enc, major | CBOR_INFO_2BYTE);
-        if (err != MCBOR_OK) return err;
-        uint8_t tmp[2];
-        put_u16(tmp, (uint16_t)value);
-        return enc_write(enc, tmp, 2);
+        out[0] = (uint8_t)(major | CBOR_INFO_2BYTE);
+        put_u16(out + 1, (uint16_t)value);
+        return 3;
     } else {
-        mcbor_err_t err = enc_byte(enc, major | CBOR_INFO_4BYTE);
-        if (err != MCBOR_OK) return err;
-        uint8_t tmp[4];
-        put_u32(tmp, value);
-        return enc_write(enc, tmp, 4);
+        out[0] = (uint8_t)(major | CBOR_INFO_4BYTE);
+        put_u32(out + 1, value);
+        return 5;
     }
+}
+
+static bool ranges_overlap(const uint8_t *a, size_t a_len,
+                           const uint8_t *b, size_t b_len)
+{
+    if (a_len == 0 || b_len == 0) return false;
+    return a < b + b_len && b < a + a_len;
+}
+
+static mcbor_err_t enc_append_item(mcbor_enc_t *enc,
+                                   const uint8_t *head, size_t head_len,
+                                   const uint8_t *payload, size_t payload_len)
+{
+    mcbor_err_t err;
+    size_t total_len;
+
+    if (enc == NULL || head == NULL) return MCBOR_ERR_NULL;
+    if (payload_len != 0 && payload == NULL) return MCBOR_ERR_NULL;
+    if (head_len > SIZE_MAX - payload_len) return MCBOR_ERR_RANGE;
+
+    total_len = head_len + payload_len;
+    err = enc_prepare_write(enc, total_len);
+    if (err != MCBOR_OK) {
+        if (err == MCBOR_ERR_OVERFLOW) {
+            enc->overflow = true;
+        }
+        return err;
+    }
+
+    if (payload_len != 0 &&
+        ranges_overlap(payload, payload_len, enc->buf + enc->pos, total_len)) {
+        return MCBOR_ERR_INVALID;
+    }
+
+    enc_commit_bytes(enc, head, head_len);
+    enc_commit_bytes(enc, payload, payload_len);
+    return MCBOR_OK;
+}
+
+static mcbor_err_t enc_append_head_only(mcbor_enc_t *enc, uint8_t major, uint32_t value)
+{
+    uint8_t head[5];
+    size_t head_len = enc_head(major, value, head);
+    return enc_append_item(enc, head, head_len, NULL, 0);
+}
+
+static mcbor_err_t enc_append_simple_byte(mcbor_enc_t *enc, uint8_t byte)
+{
+    return enc_append_item(enc, &byte, 1, NULL, 0);
 }
 
 mcbor_err_t mcbor_enc_uint(mcbor_enc_t *enc, uint32_t value)
 {
     if (enc == NULL) return MCBOR_ERR_NULL;
-    return enc_head(enc, CBOR_MAJOR_UINT, value);
+    return enc_append_head_only(enc, CBOR_MAJOR_UINT, value);
 }
 
 mcbor_err_t mcbor_enc_int(mcbor_enc_t *enc, int32_t value)
 {
     if (enc == NULL) return MCBOR_ERR_NULL;
     if (value >= 0) {
-        return enc_head(enc, CBOR_MAJOR_UINT, (uint32_t)value);
+        return enc_append_head_only(enc, CBOR_MAJOR_UINT, (uint32_t)value);
     } else {
         /* CBOR negative: -1 → 0, -2 → 1, etc. */
-        return enc_head(enc, CBOR_MAJOR_NEGINT, (uint32_t)(-(value + 1)));
+        return enc_append_head_only(enc, CBOR_MAJOR_NEGINT, (uint32_t)(-(value + 1)));
     }
 }
 
 mcbor_err_t mcbor_enc_bool(mcbor_enc_t *enc, bool value)
 {
     if (enc == NULL) return MCBOR_ERR_NULL;
-    return enc_byte(enc, CBOR_MAJOR_SIMPLE |
-                    (value ? CBOR_SIMPLE_TRUE : CBOR_SIMPLE_FALSE));
+    return enc_append_simple_byte(enc, (uint8_t)(CBOR_MAJOR_SIMPLE |
+                                  (value ? CBOR_SIMPLE_TRUE : CBOR_SIMPLE_FALSE)));
 }
 
 mcbor_err_t mcbor_enc_null(mcbor_enc_t *enc)
 {
     if (enc == NULL) return MCBOR_ERR_NULL;
-    return enc_byte(enc, CBOR_MAJOR_SIMPLE | CBOR_SIMPLE_NULL);
+    return enc_append_simple_byte(enc, (uint8_t)(CBOR_MAJOR_SIMPLE | CBOR_SIMPLE_VALUE_NULL));
 }
 
 mcbor_err_t mcbor_enc_float(mcbor_enc_t *enc, float value)
 {
+    uint8_t tmp[5];
+
     if (enc == NULL) return MCBOR_ERR_NULL;
-    mcbor_err_t err = enc_byte(enc, CBOR_MAJOR_SIMPLE | CBOR_INFO_4BYTE);
-    if (err != MCBOR_OK) return err;
-    uint8_t tmp[4];
-    put_u32(tmp, float_to_bits(value));
-    return enc_write(enc, tmp, 4);
+    if (!float32_supported()) return MCBOR_ERR_UNSUPPORTED;
+
+    tmp[0] = (uint8_t)(CBOR_MAJOR_SIMPLE | CBOR_INFO_4BYTE);
+    put_u32(tmp + 1, float_to_bits(value));
+    return enc_append_item(enc, tmp, sizeof(tmp), NULL, 0);
 }
 
 mcbor_err_t mcbor_enc_text(mcbor_enc_t *enc, const char *str, size_t len)
 {
-    if (enc == NULL || str == NULL) return MCBOR_ERR_NULL;
-    mcbor_err_t err = check_u32_range(len);
+    uint8_t head[5];
+    size_t head_len;
+    mcbor_err_t err;
+
+    if (enc == NULL) return MCBOR_ERR_NULL;
+    if (str == NULL && len != 0) return MCBOR_ERR_NULL;
+    err = check_u32_range(len);
     if (err != MCBOR_OK) return err;
-    err = enc_head(enc, CBOR_MAJOR_TEXT, (uint32_t)len);
-    if (err != MCBOR_OK) return err;
-    return enc_write(enc, str, len);
+    if (len != 0 && !is_valid_utf8((const uint8_t *)str, len)) {
+        return MCBOR_ERR_INVALID;
+    }
+
+    head_len = enc_head(CBOR_MAJOR_TEXT, (uint32_t)len, head);
+    return enc_append_item(enc, head, head_len, (const uint8_t *)str, len);
 }
 
 mcbor_err_t mcbor_enc_str(mcbor_enc_t *enc, const char *str)
@@ -244,12 +395,16 @@ mcbor_err_t mcbor_enc_str(mcbor_enc_t *enc, const char *str)
 
 mcbor_err_t mcbor_enc_bytes(mcbor_enc_t *enc, const uint8_t *data, size_t len)
 {
-    if (enc == NULL || data == NULL) return MCBOR_ERR_NULL;
-    mcbor_err_t err = check_u32_range(len);
+    uint8_t head[5];
+    size_t head_len;
+    mcbor_err_t err;
+
+    if (enc == NULL) return MCBOR_ERR_NULL;
+    if (data == NULL && len != 0) return MCBOR_ERR_NULL;
+    err = check_u32_range(len);
     if (err != MCBOR_OK) return err;
-    err = enc_head(enc, CBOR_MAJOR_BYTES, (uint32_t)len);
-    if (err != MCBOR_OK) return err;
-    return enc_write(enc, data, len);
+    head_len = enc_head(CBOR_MAJOR_BYTES, (uint32_t)len, head);
+    return enc_append_item(enc, head, head_len, data, len);
 }
 
 mcbor_err_t mcbor_enc_array(mcbor_enc_t *enc, size_t count)
@@ -257,7 +412,7 @@ mcbor_err_t mcbor_enc_array(mcbor_enc_t *enc, size_t count)
     if (enc == NULL) return MCBOR_ERR_NULL;
     mcbor_err_t err = check_u32_range(count);
     if (err != MCBOR_OK) return err;
-    return enc_head(enc, CBOR_MAJOR_ARRAY, (uint32_t)count);
+    return enc_append_head_only(enc, CBOR_MAJOR_ARRAY, (uint32_t)count);
 }
 
 mcbor_err_t mcbor_enc_map(mcbor_enc_t *enc, size_t count)
@@ -265,7 +420,7 @@ mcbor_err_t mcbor_enc_map(mcbor_enc_t *enc, size_t count)
     if (enc == NULL) return MCBOR_ERR_NULL;
     mcbor_err_t err = check_u32_range(count);
     if (err != MCBOR_OK) return err;
-    return enc_head(enc, CBOR_MAJOR_MAP, (uint32_t)count);
+    return enc_append_head_only(enc, CBOR_MAJOR_MAP, (uint32_t)count);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
