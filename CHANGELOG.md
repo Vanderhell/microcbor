@@ -1,6 +1,12 @@
 # Changelog
 
-## [1.0.0] - 2026-03-20
+## [Unreleased]
+
+### Changed
+
+- Tightened public API contracts, transactional parsing behavior, validation APIs, packaging metadata, CI definitions, and repository documentation.
+
+## [Repository baseline before tag-based releases] - 2026-03-20
 
 ### Added
 
