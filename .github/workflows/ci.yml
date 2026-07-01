@@ -4,21 +4,116 @@ on:
   push:
     branches:
       - master
-      - main
   pull_request:
     branches:
       - master
-      - main
   workflow_dispatch:
 
 jobs:
-  test:
+  linux-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+        std: [c99, c11]
+        float32: [0, 1]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+
+      - name: Install Clang
+        if: matrix.cc == 'clang'
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Build and run test suite
+        env:
+          CC: ${{ matrix.cc }}
+          MCBOR_ENABLE_FLOAT32: ${{ matrix.float32 }}
+        run: |
+          "$CC" -std=${{ matrix.std }} -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion -fshort-enums -Iinclude -DMCBOR_ENABLE_FLOAT32=${MCBOR_ENABLE_FLOAT32} src/mcbor.c tests/test_all.c -lm -o test_all
+          ./test_all
+
+      - name: Compile fuzz target
+        if: matrix.cc == 'clang' && matrix.float32 == 1 && matrix.std == 'c11'
+        run: |
+          clang -std=c11 -fsanitize=fuzzer,address,undefined -Iinclude src/mcbor.c tests/fuzz/fuzz_decode.c -o fuzz_decode
+          ./fuzz_decode tests/fuzz/corpus/empty -runs=1
+
+      - name: Compile-fail fixture
+        shell: bash
+        run: |
+          if ${{ matrix.cc }} -std=${{ matrix.std }} -Iinclude tests/compile_fail/invalid_float32_zero.c -c -o /tmp/invalid.o; then
+            echo "expected compile failure" >&2
+            exit 1
+          fi
+
+  asan-ubsan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
 
-      - name: Build and run tests
+      - name: Run ASan and UBSan
         run: |
-          gcc -std=c99 -Wall -Wextra -Wpedantic -Werror -Iinclude src/mcbor.c tests/test_all.c -lm -o test_all
-          ./test_all
+          clang -std=c11 -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Wpedantic -Werror -Iinclude src/mcbor.c tests/test_all.c -lm -o test_san
+          ./test_san
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+
+      - name: Clang static analysis
+        run: clang --analyze -std=c11 -Iinclude src/mcbor.c
+
+  cmake-consumers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+
+      - name: Configure and build install tree
+        run: |
+          cmake -S . -B build -DMCBOR_BUILD_TESTS=OFF -DMCBOR_BUILD_FUZZ=OFF
+          cmake --build build
+          cmake --install build --prefix install
+
+      - name: Configure find_package consumer
+        run: |
+          cmake -S tests/consumers/find_package -B build-find -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install"
+          cmake --build build-find
+
+      - name: Configure add_subdirectory and C++ consumers
+        run: |
+          cmake -S tests/consumers/add_subdirectory -B build-sub
+          cmake --build build-sub
+
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+
+      - name: Configure and build with MSVC
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DMCBOR_BUILD_TESTS=ON
+          cmake --build build --config Release
+
+  arm-compile-only:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cpu: [cortex-m0plus, cortex-m4]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+
+      - name: Install ARM toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+
+      - name: Compile-only
+        run: |
+          arm-none-eabi-gcc -std=c99 -mcpu=${{ matrix.cpu }} -mthumb -ffreestanding -Wall -Wextra -Wpedantic -Werror -Iinclude -c src/mcbor.c -o /tmp/mcbor-${{ matrix.cpu }}.o
