@@ -39,12 +39,6 @@ static mcbor_err_t check_u32_range(size_t value)
     return MCBOR_OK;
 }
 
-static bool float32_supported(void)
-{
-    return FLT_RADIX == 2 && FLT_MANT_DIG == 24 && FLT_MAX_EXP == 128 &&
-           sizeof(float) == 4;
-}
-
 static bool is_valid_utf8(const uint8_t *data, size_t len)
 {
     size_t i = 0;
@@ -192,6 +186,12 @@ static inline uint32_t get_u32(const uint8_t *p)
            (uint32_t)p[2] << 8  | (uint32_t)p[3];
 }
 
+#if MCBOR_ENABLE_FLOAT32
+typedef char mcbor_float32_must_be_ieee754_binary32[
+    (sizeof(float) == 4 && FLT_RADIX == 2 &&
+     FLT_MANT_DIG == 24 && FLT_MAX_EXP == 128) ? 1 : -1];
+#endif
+
 /* ── Float bit-cast (avoids strict aliasing) ───────────────────────────── */
 
 static inline uint32_t float_to_bits(float f)
@@ -225,6 +225,7 @@ mcbor_err_t mcbor_enc_init(mcbor_enc_t *enc, uint8_t *buf, size_t cap)
 mcbor_err_t mcbor_enc_size(const mcbor_enc_t *enc, size_t *out_size)
 {
     if (enc == NULL || out_size == NULL) return MCBOR_ERR_NULL;
+    if (enc->pos > enc->capacity) return MCBOR_ERR_INVALID;
     *out_size = enc->pos;
     return MCBOR_OK;
 }
@@ -232,6 +233,7 @@ mcbor_err_t mcbor_enc_size(const mcbor_enc_t *enc, size_t *out_size)
 mcbor_err_t mcbor_enc_overflow(const mcbor_enc_t *enc, bool *out_overflow)
 {
     if (enc == NULL || out_overflow == NULL) return MCBOR_ERR_NULL;
+    if (enc->pos > enc->capacity) return MCBOR_ERR_INVALID;
     *out_overflow = enc->overflow;
     return MCBOR_OK;
 }
@@ -362,11 +364,15 @@ mcbor_err_t mcbor_enc_float(mcbor_enc_t *enc, float value)
     uint8_t tmp[5];
 
     if (enc == NULL) return MCBOR_ERR_NULL;
-    if (!float32_supported()) return MCBOR_ERR_UNSUPPORTED;
+#if !MCBOR_ENABLE_FLOAT32
+    (void)value;
+    return MCBOR_ERR_UNSUPPORTED;
+#else
 
     tmp[0] = (uint8_t)(CBOR_MAJOR_SIMPLE | CBOR_INFO_4BYTE);
     put_u32(tmp + 1, float_to_bits(value));
     return enc_append_item(enc, tmp, sizeof(tmp), NULL, 0);
+#endif
 }
 
 mcbor_err_t mcbor_enc_text(mcbor_enc_t *enc, const char *str, size_t len)
@@ -439,6 +445,7 @@ mcbor_err_t mcbor_dec_init(mcbor_dec_t *dec, const uint8_t *buf, size_t size)
 mcbor_err_t mcbor_dec_remaining(const mcbor_dec_t *dec, size_t *out_remaining)
 {
     if (dec == NULL || out_remaining == NULL) return MCBOR_ERR_NULL;
+    if (dec->pos > dec->size) return MCBOR_ERR_INVALID;
     *out_remaining = dec->size - dec->pos;
     return MCBOR_OK;
 }
@@ -446,7 +453,15 @@ mcbor_err_t mcbor_dec_remaining(const mcbor_dec_t *dec, size_t *out_remaining)
 mcbor_err_t mcbor_dec_done(const mcbor_dec_t *dec, bool *out_done)
 {
     if (dec == NULL || out_done == NULL) return MCBOR_ERR_NULL;
+    if (dec->pos > dec->size) return MCBOR_ERR_INVALID;
     *out_done = dec->pos >= dec->size;
+    return MCBOR_OK;
+}
+
+static mcbor_err_t dec_require_bytes(const mcbor_dec_t *dec, size_t needed)
+{
+    if (dec->pos > dec->size) return MCBOR_ERR_INVALID;
+    if (needed > dec->size - dec->pos) return MCBOR_ERR_UNDERFLOW;
     return MCBOR_OK;
 }
 
@@ -459,20 +474,23 @@ static mcbor_err_t dec_argument(mcbor_dec_t *dec, uint8_t info, uint32_t *value)
     }
 
     if (info == CBOR_INFO_1BYTE) {
-        if (dec->pos + 1 > dec->size) return MCBOR_ERR_UNDERFLOW;
+        mcbor_err_t err = dec_require_bytes(dec, 1);
+        if (err != MCBOR_OK) return err;
         *value = dec->buf[dec->pos++];
         return MCBOR_OK;
     }
 
     if (info == CBOR_INFO_2BYTE) {
-        if (dec->pos + 2 > dec->size) return MCBOR_ERR_UNDERFLOW;
+        mcbor_err_t err = dec_require_bytes(dec, 2);
+        if (err != MCBOR_OK) return err;
         *value = get_u16(dec->buf + dec->pos);
         dec->pos += 2;
         return MCBOR_OK;
     }
 
     if (info == CBOR_INFO_4BYTE) {
-        if (dec->pos + 4 > dec->size) return MCBOR_ERR_UNDERFLOW;
+        mcbor_err_t err = dec_require_bytes(dec, 4);
+        if (err != MCBOR_OK) return err;
         *value = get_u32(dec->buf + dec->pos);
         dec->pos += 4;
         return MCBOR_OK;
@@ -481,19 +499,22 @@ static mcbor_err_t dec_argument(mcbor_dec_t *dec, uint8_t info, uint32_t *value)
     return MCBOR_ERR_INVALID;  /* 8-byte or reserved */
 }
 
-mcbor_err_t mcbor_dec_next(mcbor_dec_t *dec, mcbor_value_t *val)
+static mcbor_err_t dec_next_core(mcbor_dec_t *dec, mcbor_value_t *val)
 {
-    if (dec == NULL || val == NULL) return MCBOR_ERR_NULL;
-    if (dec->pos >= dec->size) return MCBOR_ERR_UNDERFLOW;
+    uint8_t initial;
+    uint8_t major;
+    uint8_t info;
+    uint32_t argument = 0;
+    mcbor_err_t err;
+
+    err = dec_require_bytes(dec, 1);
+    if (err != MCBOR_OK) return err;
 
     memset(val, 0, sizeof(*val));
 
-    uint8_t initial = dec->buf[dec->pos++];
-    uint8_t major = initial & CBOR_MAJOR_MASK;
-    uint8_t info  = initial & CBOR_INFO_MASK;
-
-    uint32_t argument = 0;
-    mcbor_err_t err;
+    initial = dec->buf[dec->pos++];
+    major = initial & CBOR_MAJOR_MASK;
+    info  = initial & CBOR_INFO_MASK;
 
     switch (major) {
     case CBOR_MAJOR_UINT:
@@ -506,6 +527,7 @@ mcbor_err_t mcbor_dec_next(mcbor_dec_t *dec, mcbor_value_t *val)
     case CBOR_MAJOR_NEGINT:
         err = dec_argument(dec, info, &argument);
         if (err != MCBOR_OK) return err;
+        if (argument > INT32_MAX) return MCBOR_ERR_RANGE;
         val->type = MCBOR_NEGINT;
         val->val.int_val = -1 - (int32_t)argument;
         return MCBOR_OK;
@@ -513,7 +535,8 @@ mcbor_err_t mcbor_dec_next(mcbor_dec_t *dec, mcbor_value_t *val)
     case CBOR_MAJOR_BYTES:
         err = dec_argument(dec, info, &argument);
         if (err != MCBOR_OK) return err;
-        if (dec->pos + (size_t)argument > dec->size) return MCBOR_ERR_UNDERFLOW;
+        err = dec_require_bytes(dec, argument);
+        if (err != MCBOR_OK) return err;
         val->type = MCBOR_BYTES;
         val->val.bytes.ptr = dec->buf + dec->pos;
         val->val.bytes.len = argument;
@@ -523,7 +546,9 @@ mcbor_err_t mcbor_dec_next(mcbor_dec_t *dec, mcbor_value_t *val)
     case CBOR_MAJOR_TEXT:
         err = dec_argument(dec, info, &argument);
         if (err != MCBOR_OK) return err;
-        if (dec->pos + (size_t)argument > dec->size) return MCBOR_ERR_UNDERFLOW;
+        err = dec_require_bytes(dec, argument);
+        if (err != MCBOR_OK) return err;
+        if (!is_valid_utf8(dec->buf + dec->pos, argument)) return MCBOR_ERR_INVALID;
         val->type = MCBOR_TEXT;
         val->val.bytes.ptr = dec->buf + dec->pos;
         val->val.bytes.len = argument;
@@ -563,14 +588,18 @@ mcbor_err_t mcbor_dec_next(mcbor_dec_t *dec, mcbor_value_t *val)
             return MCBOR_OK;
         }
         if (info == CBOR_INFO_4BYTE) {
-            /* float32 */
-            if (dec->pos + 4 > dec->size) return MCBOR_ERR_UNDERFLOW;
-            uint32_t bits = get_u32(dec->buf + dec->pos);
+#if !MCBOR_ENABLE_FLOAT32
+            return MCBOR_ERR_UNSUPPORTED;
+#else
+            err = dec_require_bytes(dec, 4);
+            if (err != MCBOR_OK) return err;
+            argument = get_u32(dec->buf + dec->pos);
             dec->pos += 4;
             val->type = MCBOR_SIMPLE;
             val->simple_kind = MCBOR_SIMPLE_FLOAT32;
-            val->val.float_val = bits_to_float(bits);
+            val->val.float_val = bits_to_float(argument);
             return MCBOR_OK;
+#endif
         }
         return MCBOR_ERR_INVALID;
 
@@ -579,31 +608,62 @@ mcbor_err_t mcbor_dec_next(mcbor_dec_t *dec, mcbor_value_t *val)
     }
 }
 
+mcbor_err_t mcbor_dec_next(mcbor_dec_t *dec, mcbor_value_t *val)
+{
+    mcbor_dec_t next;
+    mcbor_value_t local_val;
+    mcbor_err_t err;
+
+    if (dec == NULL || val == NULL) return MCBOR_ERR_NULL;
+
+    next = *dec;
+    err = dec_next_core(&next, &local_val);
+    if (err != MCBOR_OK) return err;
+
+    *dec = next;
+    *val = local_val;
+    return MCBOR_OK;
+}
+
 /* ── Convenience typed decoders ────────────────────────────────────────── */
 
 mcbor_err_t mcbor_dec_uint(mcbor_dec_t *dec, uint32_t *out)
 {
-    if (out == NULL) return MCBOR_ERR_NULL;
+    mcbor_dec_t next;
     mcbor_value_t val;
-    mcbor_err_t err = mcbor_dec_next(dec, &val);
+    mcbor_err_t err;
+
+    if (dec == NULL) return MCBOR_ERR_NULL;
+    if (out == NULL) return MCBOR_ERR_NULL;
+    next = *dec;
+    err = dec_next_core(&next, &val);
     if (err != MCBOR_OK) return err;
     if (val.type != MCBOR_UINT) return MCBOR_ERR_TYPE;
     *out = val.val.uint_val;
+    *dec = next;
     return MCBOR_OK;
 }
 
 mcbor_err_t mcbor_dec_int(mcbor_dec_t *dec, int32_t *out)
 {
-    if (out == NULL) return MCBOR_ERR_NULL;
+    mcbor_dec_t next;
     mcbor_value_t val;
-    mcbor_err_t err = mcbor_dec_next(dec, &val);
+    mcbor_err_t err;
+
+    if (dec == NULL) return MCBOR_ERR_NULL;
+    if (out == NULL) return MCBOR_ERR_NULL;
+    next = *dec;
+    err = dec_next_core(&next, &val);
     if (err != MCBOR_OK) return err;
     if (val.type == MCBOR_UINT) {
+        if (val.val.uint_val > INT32_MAX) return MCBOR_ERR_RANGE;
         *out = (int32_t)val.val.uint_val;
+        *dec = next;
         return MCBOR_OK;
     }
     if (val.type == MCBOR_NEGINT) {
         *out = val.val.int_val;
+        *dec = next;
         return MCBOR_OK;
     }
     return MCBOR_ERR_TYPE;
@@ -611,102 +671,151 @@ mcbor_err_t mcbor_dec_int(mcbor_dec_t *dec, int32_t *out)
 
 mcbor_err_t mcbor_dec_bool(mcbor_dec_t *dec, bool *out)
 {
-    if (out == NULL) return MCBOR_ERR_NULL;
+    mcbor_dec_t next;
     mcbor_value_t val;
-    mcbor_err_t err = mcbor_dec_next(dec, &val);
+    mcbor_err_t err;
+
+    if (dec == NULL) return MCBOR_ERR_NULL;
+    if (out == NULL) return MCBOR_ERR_NULL;
+    next = *dec;
+    err = dec_next_core(&next, &val);
     if (err != MCBOR_OK) return err;
     if (val.type != MCBOR_SIMPLE || val.simple_kind != MCBOR_SIMPLE_BOOL) {
         return MCBOR_ERR_TYPE;
     }
     *out = val.val.bool_val;
+    *dec = next;
     return MCBOR_OK;
 }
 
 mcbor_err_t mcbor_dec_float(mcbor_dec_t *dec, float *out)
 {
-    if (out == NULL) return MCBOR_ERR_NULL;
+    mcbor_dec_t next;
     mcbor_value_t val;
-    mcbor_err_t err = mcbor_dec_next(dec, &val);
+    mcbor_err_t err;
+
+    if (dec == NULL) return MCBOR_ERR_NULL;
+    if (out == NULL) return MCBOR_ERR_NULL;
+    next = *dec;
+    err = dec_next_core(&next, &val);
     if (err != MCBOR_OK) return err;
     if (val.type != MCBOR_SIMPLE || val.simple_kind != MCBOR_SIMPLE_FLOAT32) {
         return MCBOR_ERR_TYPE;
     }
     *out = val.val.float_val;
+    *dec = next;
     return MCBOR_OK;
 }
 
 mcbor_err_t mcbor_dec_str(mcbor_dec_t *dec, char *out, size_t out_size,
                            size_t *out_len)
 {
-    if (out == NULL) return MCBOR_ERR_NULL;
+    mcbor_dec_t next;
     mcbor_value_t val;
-    mcbor_err_t err = mcbor_dec_next(dec, &val);
+    mcbor_err_t err;
+
+    if (dec == NULL) return MCBOR_ERR_NULL;
+    if (out == NULL) return MCBOR_ERR_NULL;
+    next = *dec;
+    err = dec_next_core(&next, &val);
     if (err != MCBOR_OK) return err;
     if (val.type != MCBOR_TEXT) return MCBOR_ERR_TYPE;
-    if (val.val.bytes.len >= out_size) return MCBOR_ERR_SIZE;
+    if (out_len != NULL) *out_len = val.val.bytes.len;
+    if (out_size == 0 || val.val.bytes.len >= out_size) return MCBOR_ERR_SIZE;
     memcpy(out, val.val.bytes.ptr, val.val.bytes.len);
     out[val.val.bytes.len] = '\0';
-    if (out_len != NULL) *out_len = val.val.bytes.len;
+    *dec = next;
     return MCBOR_OK;
 }
 
 mcbor_err_t mcbor_dec_bytes_ref(mcbor_dec_t *dec, const uint8_t **out,
                                  size_t *out_len)
 {
-    if (out == NULL || out_len == NULL) return MCBOR_ERR_NULL;
+    mcbor_dec_t next;
     mcbor_value_t val;
-    mcbor_err_t err = mcbor_dec_next(dec, &val);
+    mcbor_err_t err;
+
+    if (dec == NULL) return MCBOR_ERR_NULL;
+    if (out == NULL || out_len == NULL) return MCBOR_ERR_NULL;
+    next = *dec;
+    err = dec_next_core(&next, &val);
     if (err != MCBOR_OK) return err;
     if (val.type != MCBOR_BYTES) return MCBOR_ERR_TYPE;
     *out = val.val.bytes.ptr;
     *out_len = val.val.bytes.len;
+    *dec = next;
     return MCBOR_OK;
 }
 
 mcbor_err_t mcbor_dec_array(mcbor_dec_t *dec, size_t *count)
 {
-    if (count == NULL) return MCBOR_ERR_NULL;
+    mcbor_dec_t next;
     mcbor_value_t val;
-    mcbor_err_t err = mcbor_dec_next(dec, &val);
+    mcbor_err_t err;
+
+    if (dec == NULL) return MCBOR_ERR_NULL;
+    if (count == NULL) return MCBOR_ERR_NULL;
+    next = *dec;
+    err = dec_next_core(&next, &val);
     if (err != MCBOR_OK) return err;
     if (val.type != MCBOR_ARRAY) return MCBOR_ERR_TYPE;
     *count = val.val.container;
+    *dec = next;
     return MCBOR_OK;
 }
 
 mcbor_err_t mcbor_dec_map(mcbor_dec_t *dec, size_t *count)
 {
-    if (count == NULL) return MCBOR_ERR_NULL;
+    mcbor_dec_t next;
     mcbor_value_t val;
-    mcbor_err_t err = mcbor_dec_next(dec, &val);
+    mcbor_err_t err;
+
+    if (dec == NULL) return MCBOR_ERR_NULL;
+    if (count == NULL) return MCBOR_ERR_NULL;
+    next = *dec;
+    err = dec_next_core(&next, &val);
     if (err != MCBOR_OK) return err;
     if (val.type != MCBOR_MAP) return MCBOR_ERR_TYPE;
     *count = val.val.container;
+    *dec = next;
+    return MCBOR_OK;
+}
+
+static mcbor_err_t dec_skip_core(mcbor_dec_t *dec)
+{
+    mcbor_value_t val;
+    mcbor_err_t err = dec_next_core(dec, &val);
+    if (err != MCBOR_OK) return err;
+
+    /* For non-containers, the item is already consumed */
+    if (val.type == MCBOR_ARRAY) {
+        size_t i;
+        for (i = 0; i < val.val.container; i++) {
+            err = dec_skip_core(dec);
+            if (err != MCBOR_OK) return err;
+        }
+    } else if (val.type == MCBOR_MAP) {
+        size_t i;
+        for (i = 0; i < val.val.container; i++) {
+            err = dec_skip_core(dec);  /* key */
+            if (err != MCBOR_OK) return err;
+            err = dec_skip_core(dec);  /* value */
+            if (err != MCBOR_OK) return err;
+        }
+    }
+
     return MCBOR_OK;
 }
 
 mcbor_err_t mcbor_dec_skip(mcbor_dec_t *dec)
 {
+    mcbor_dec_t next;
+    mcbor_err_t err;
+
     if (dec == NULL) return MCBOR_ERR_NULL;
-
-    mcbor_value_t val;
-    mcbor_err_t err = mcbor_dec_next(dec, &val);
+    next = *dec;
+    err = dec_skip_core(&next);
     if (err != MCBOR_OK) return err;
-
-    /* For non-containers, the item is already consumed */
-    if (val.type == MCBOR_ARRAY) {
-        for (uint32_t i = 0; i < val.val.container; i++) {
-            err = mcbor_dec_skip(dec);
-            if (err != MCBOR_OK) return err;
-        }
-    } else if (val.type == MCBOR_MAP) {
-        for (uint32_t i = 0; i < val.val.container; i++) {
-            err = mcbor_dec_skip(dec);  /* key */
-            if (err != MCBOR_OK) return err;
-            err = mcbor_dec_skip(dec);  /* value */
-            if (err != MCBOR_OK) return err;
-        }
-    }
-
+    *dec = next;
     return MCBOR_OK;
 }

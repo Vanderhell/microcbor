@@ -17,6 +17,7 @@
 extern "C" {
 #endif
 
+#include "mcbor_config.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
