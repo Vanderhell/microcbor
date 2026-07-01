@@ -6,6 +6,7 @@
  */
 
 #include "mcbor.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -16,17 +17,22 @@ static int tests_run = 0, tests_passed = 0, tests_failed = 0;
 
 #define TEST(name) static void name(void)
 #define RUN_TEST(name) do {                                     \
+    int failed_before_ = tests_failed;                          \
     tests_run++;                                                \
     printf("  %-55s ", #name);                                  \
     name();                                                     \
-    printf("PASS\n");                                           \
-    tests_passed++;                                             \
+    if (tests_failed == failed_before_) {                       \
+        printf("PASS\n");                                       \
+        tests_passed++;                                         \
+    }                                                           \
 } while (0)
 
 #define ASSERT_EQ(expected, actual) do {                        \
-    if ((expected) != (actual)) {                               \
-        printf("FAIL\n    %s:%d: expected %d, got %d\n",       \
-               __FILE__, __LINE__, (int)(expected), (int)(actual)); \
+    intmax_t expected_ = (intmax_t)(expected);                  \
+    intmax_t actual_ = (intmax_t)(actual);                      \
+    if (expected_ != actual_) {                                 \
+        printf("FAIL\n    %s:%d: expected %" PRIdMAX ", got %" PRIdMAX "\n", \
+               __FILE__, __LINE__, expected_, actual_);         \
         tests_failed++; return;                                 \
     }                                                           \
 } while (0)
@@ -56,9 +62,12 @@ static int tests_run = 0, tests_passed = 0, tests_failed = 0;
 } while (0)
 
 #define ASSERT_FLOAT_EQ(expected, actual) do {                  \
-    if (fabsf((expected) - (actual)) > 0.001f) {                \
+    float expected_ = (expected);                               \
+    float actual_ = (actual);                                   \
+    if (isnan(expected_) || isnan(actual_) ||                   \
+        fabsf(expected_ - actual_) > 0.001f) {                  \
         printf("FAIL\n    %s:%d: expected %f, got %f\n",       \
-               __FILE__, __LINE__, (double)(expected), (double)(actual)); \
+               __FILE__, __LINE__, (double)expected_, (double)actual_); \
         tests_failed++; return;                                 \
     }                                                           \
 } while (0)
