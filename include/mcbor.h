@@ -59,6 +59,17 @@ typedef uint8_t mcbor_simple_kind_t;
 
 const char *mcbor_type_name(mcbor_type_t type);
 
+/*
+ * Supported CBOR profile:
+ * definite-length RFC 8949 subset with 32-bit application integers,
+ * booleans, null, optional float32, text, bytes, arrays, and maps.
+ * Tags, indefinite lengths, 64-bit integer arguments, float16, and float64
+ * are not supported. The encoder uses shortest-width heads for supported
+ * integer and length arguments, but it does not produce canonical or
+ * deterministic CBOR: map keys are not sorted, duplicate keys are allowed,
+ * and NaN payloads are emitted as provided when float32 is enabled.
+ */
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * Encoder
  *
@@ -118,13 +129,15 @@ mcbor_err_t mcbor_enc_bytes(mcbor_enc_t *enc, const uint8_t *data, size_t len);
 
 /**
  * Begin a definite-length array.
- * After this, encode exactly `count` items.
+ * This writes only the container header.
+ * The encoder does not track whether `count` child items are later emitted.
  */
 mcbor_err_t mcbor_enc_array(mcbor_enc_t *enc, size_t count);
 
 /**
  * Begin a definite-length map.
- * After this, encode exactly `count` key-value pairs (2 × count items).
+ * This writes only the container header.
+ * The encoder does not track whether `count` key-value pairs are later emitted.
  */
 mcbor_err_t mcbor_enc_map(mcbor_enc_t *enc, size_t count);
 
@@ -170,7 +183,7 @@ mcbor_err_t mcbor_dec_init(mcbor_dec_t *dec, const uint8_t *buf, size_t size);
 /** Get remaining unread bytes. */
 mcbor_err_t mcbor_dec_remaining(const mcbor_dec_t *dec, size_t *out_remaining);
 
-/** Check if all data has been consumed. */
+/** Check if all input bytes have been consumed. This does not validate container completeness. */
 mcbor_err_t mcbor_dec_done(const mcbor_dec_t *dec, bool *out_done);
 
 /**
@@ -209,6 +222,10 @@ mcbor_err_t mcbor_dec_str(mcbor_dec_t *dec, char *out, size_t out_size,
 /**
  * Decode next item as byte string.
  * Returns pointer into input buffer (zero-copy) + length.
+ * The caller owns encoder/decoder instances and buffers. Zero-copy references
+ * remain valid only while the decoder input buffer remains valid and unchanged.
+ * Separate instances with separate buffers are reentrant, but one instance or
+ * buffer must not be used concurrently without external synchronization.
  */
 mcbor_err_t mcbor_dec_bytes_ref(mcbor_dec_t *dec, const uint8_t **out,
                                  size_t *out_len);
@@ -224,6 +241,12 @@ mcbor_err_t mcbor_dec_map(mcbor_dec_t *dec, size_t *count);
  * Useful for ignoring unknown map keys.
  */
 mcbor_err_t mcbor_dec_skip(mcbor_dec_t *dec);
+
+/**
+ * Validate exactly one complete top-level supported CBOR item.
+ * Rejects trailing bytes and malformed nested containers.
+ */
+mcbor_err_t mcbor_validate_one(const uint8_t *buf, size_t size);
 
 #ifdef __cplusplus
 }

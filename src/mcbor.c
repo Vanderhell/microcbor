@@ -783,24 +783,28 @@ mcbor_err_t mcbor_dec_map(mcbor_dec_t *dec, size_t *count)
 
 static mcbor_err_t dec_skip_core(mcbor_dec_t *dec)
 {
-    mcbor_value_t val;
-    mcbor_err_t err = dec_next_core(dec, &val);
-    if (err != MCBOR_OK) return err;
+    size_t pending = 1;
 
-    /* For non-containers, the item is already consumed */
-    if (val.type == MCBOR_ARRAY) {
-        size_t i;
-        for (i = 0; i < val.val.container; i++) {
-            err = dec_skip_core(dec);
-            if (err != MCBOR_OK) return err;
+    while (pending != 0) {
+        mcbor_value_t val;
+        size_t child_count = 0;
+        mcbor_err_t err = dec_next_core(dec, &val);
+        if (err != MCBOR_OK) return err;
+
+        pending--;
+
+        if (val.type == MCBOR_ARRAY) {
+            child_count = val.val.container;
+        } else if (val.type == MCBOR_MAP) {
+            if (val.val.container > SIZE_MAX / 2) return MCBOR_ERR_RANGE;
+            child_count = val.val.container * 2;
         }
-    } else if (val.type == MCBOR_MAP) {
-        size_t i;
-        for (i = 0; i < val.val.container; i++) {
-            err = dec_skip_core(dec);  /* key */
-            if (err != MCBOR_OK) return err;
-            err = dec_skip_core(dec);  /* value */
-            if (err != MCBOR_OK) return err;
+
+        if (child_count != 0) {
+            size_t remaining = dec->size - dec->pos;
+            if (child_count > remaining) return MCBOR_ERR_INVALID;
+            if (child_count > SIZE_MAX - pending) return MCBOR_ERR_RANGE;
+            pending += child_count;
         }
     }
 
@@ -817,5 +821,23 @@ mcbor_err_t mcbor_dec_skip(mcbor_dec_t *dec)
     err = dec_skip_core(&next);
     if (err != MCBOR_OK) return err;
     *dec = next;
+    return MCBOR_OK;
+}
+
+mcbor_err_t mcbor_validate_one(const uint8_t *buf, size_t size)
+{
+    mcbor_dec_t dec;
+    mcbor_err_t err;
+
+    if (buf == NULL) return MCBOR_ERR_NULL;
+    if (size == 0) return MCBOR_ERR_UNDERFLOW;
+
+    err = mcbor_dec_init(&dec, buf, size);
+    if (err != MCBOR_OK) return err;
+
+    err = mcbor_dec_skip(&dec);
+    if (err != MCBOR_OK) return err;
+
+    if (dec.pos != dec.size) return MCBOR_ERR_INVALID;
     return MCBOR_OK;
 }
