@@ -361,13 +361,12 @@ mcbor_err_t mcbor_enc_null(mcbor_enc_t *enc)
 
 mcbor_err_t mcbor_enc_float(mcbor_enc_t *enc, float value)
 {
-    uint8_t tmp[5];
-
     if (enc == NULL) return MCBOR_ERR_NULL;
 #if !MCBOR_ENABLE_FLOAT32
     (void)value;
     return MCBOR_ERR_UNSUPPORTED;
 #else
+    uint8_t tmp[5];
 
     tmp[0] = (uint8_t)(CBOR_MAJOR_SIMPLE | CBOR_INFO_4BYTE);
     put_u32(tmp + 1, float_to_bits(value));

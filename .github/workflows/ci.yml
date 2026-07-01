@@ -96,9 +96,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
 
+      - name: Set up MSVC developer command prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Configure and build with MSVC
         run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DMCBOR_BUILD_TESTS=ON
+          cmake -S . -B build -G Ninja -DMCBOR_BUILD_TESTS=ON
           cmake --build build --config Release
 
   arm-compile-only:
